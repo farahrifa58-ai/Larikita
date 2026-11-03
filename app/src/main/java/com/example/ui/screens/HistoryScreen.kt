@@ -22,6 +22,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.RunEntity
+import android.content.Context
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
 import com.example.domain.tracker.HaversineCalculator
 import com.example.ui.components.LeafletMapView
 import com.example.ui.theme.*
@@ -37,11 +40,13 @@ fun HistoryScreen(
     onFilterChange: (HistoryFilter) -> Unit,
     onDeleteRun: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale("id", "ID")) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale("id", "ID")) }
 
     var selectedRunForDetail by remember { mutableStateOf<RunEntity?>(null) }
     var runToDelete by remember { mutableStateOf<RunEntity?>(null) }
+    var runToShare by remember { mutableStateOf<RunEntity?>(null) }
 
     // Filter runs
     val filteredRuns = remember(runs, currentFilter) {
@@ -180,7 +185,7 @@ fun HistoryScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
                                         text = run.title,
                                         fontWeight = FontWeight.Bold,
@@ -196,16 +201,30 @@ fun HistoryScreen(
                                     )
                                 }
 
-                                IconButton(
-                                    onClick = { runToDelete = run },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DeleteOutline,
-                                        contentDescription = "Hapus",
-                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { runToShare = run },
+                                        modifier = Modifier.size(36.dp).testTag("share_run_${run.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = "Bagikan",
+                                            tint = LimeGreenPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { runToDelete = run },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Hapus",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
 
@@ -311,8 +330,242 @@ fun HistoryScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { selectedRunForDetail = null }) {
-                    Text("Tutup", fontWeight = FontWeight.Bold)
+                Row {
+                    TextButton(
+                        onClick = {
+                            val r = selectedRunForDetail
+                            selectedRunForDetail = null
+                            runToShare = r
+                        }
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Bagikan", fontWeight = FontWeight.Bold, color = LimeGreenPrimary)
+                    }
+                    TextButton(onClick = { selectedRunForDetail = null }) {
+                        Text("Tutup", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        )
+    }
+
+    // Share Options Dialog (Image Card vs Text)
+    if (runToShare != null) {
+        val run = runToShare!!
+        val dateFormatted = dateFormat.format(Date(run.startTime))
+        val timeFormatted = timeFormat.format(Date(run.startTime))
+
+        AlertDialog(
+            onDismissRequest = { runToShare = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    tint = LimeGreenPrimary,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Bagikan Aktivitas Lari",
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Pilih format untuk membagikan pencapaian larimu ke media sosial atau teman:",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Preview Card for Run Stat Card
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF0F1722),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, LimeGreenPrimary.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsRun,
+                                        contentDescription = null,
+                                        tint = LimeGreenPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "LARIKITA",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 12.sp,
+                                        color = LimeGreenPrimary,
+                                        letterSpacing = 1.sp
+                                    )
+                                }
+                                Text(
+                                    text = "$dateFormatted • $timeFormatted",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = run.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = Color.White
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(
+                                    text = "%.2f".format(Locale.US, run.distanceKm),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 28.sp,
+                                    color = LimeGreenPrimary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "KM",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(bottom = 3.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text("Durasi", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                                    Text(
+                                        HaversineCalculator.formatDuration(run.durationSeconds),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                                Column {
+                                    Text("Pace", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                                    Text(
+                                        run.averagePace,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PaceMetricColor
+                                    )
+                                }
+                                Column {
+                                    Text("Kalori", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                                    Text(
+                                        "${run.calories} kcal",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CalorieMetricColor
+                                    )
+                                }
+                                Column {
+                                    Text("Kec. Avg", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                                    Text(
+                                        "%.1f km/j".format(Locale.US, run.averageSpeed),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SpeedMetricColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Option 1: Share as Image Card
+                    Button(
+                        onClick = {
+                            com.example.ui.util.RunShareHelper.shareRunAsImage(context, run)
+                            runToShare = null
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("share_image_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = LimeGreenPrimary,
+                            contentColor = Color(0xFF09140D)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Bagikan Kartu Gambar",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Option 2: Share as Text
+                    OutlinedButton(
+                        onClick = {
+                            com.example.ui.util.RunShareHelper.shareRunAsText(context, run)
+                            runToShare = null
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("share_text_button"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Bagikan Format Teks",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(
+                    onClick = { runToShare = null },
+                    modifier = Modifier.testTag("cancel_share_button")
+                ) {
+                    Text("Batal")
                 }
             }
         )

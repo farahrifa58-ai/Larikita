@@ -127,6 +127,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val syncMessage: StateFlow<String?> = _syncMessage.asStateFlow()
 
     init {
+        trackingManager.warmUpGps()
         networkMonitor.setOnNetworkAvailable {
             triggerSmartSync()
         }
@@ -135,6 +136,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 triggerSmartSync()
             }
         }
+    }
+
+    fun warmUpGps() {
+        trackingManager.warmUpGps()
     }
 
     fun triggerSmartSync() {
@@ -155,6 +160,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun navigateTo(screen: AppScreen) {
         _currentScreen.value = screen
+        if (screen == AppScreen.LARI || screen == AppScreen.BERANDA) {
+            trackingManager.warmUpGps()
+        }
     }
 
     fun setHistoryFilter(filter: HistoryFilter) {
@@ -272,8 +280,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _syncMessage.value = null
     }
 
+    val lastDriveBackupTime = MutableStateFlow(userSettingsRepository.getLastDriveBackupTime())
+
     fun updateProfile(profile: UserProfile) {
         userSettingsRepository.updateProfile(profile)
+    }
+
+    fun updateUserName(name: String) {
+        userSettingsRepository.updateUserName(name)
+        _syncMessage.value = "Nama profil berhasil diperbarui."
+    }
+
+    fun saveProfileAvatar(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val savedPath = userSettingsRepository.saveAvatarPhoto(getApplication(), uri)
+            if (savedPath.isNotEmpty()) {
+                _syncMessage.value = "Foto profil berhasil diperbarui."
+            }
+        }
+    }
+
+    fun recordDriveBackup() {
+        val now = System.currentTimeMillis()
+        userSettingsRepository.setLastDriveBackupTime(now)
+        lastDriveBackupTime.value = now
+        _syncMessage.value = "Cadangan riwayat berhasil disimpan ke Google Drive."
+    }
+
+    fun setLanguage(langCode: String) {
+        userSettingsRepository.setLanguage(langCode)
+    }
+
+    fun setDistanceUnit(unit: String) {
+        userSettingsRepository.setDistanceUnit(unit)
     }
 
     fun toggleDarkMode(isDark: Boolean) {

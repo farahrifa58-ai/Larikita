@@ -9,5 +9,8 @@ data class UserProfile(
     val monthlyTargetKm: Double = 60.0,
     val weightKg: Double = 65.0,
     val isDarkMode: Boolean = false,
-    val isAutoSync: Boolean = true
+    val isAutoSync: Boolean = true,
+    val languageCode: String = "id",
+    val isLoggedIn: Boolean = false,
+    val distanceUnit: String = "km"
 )

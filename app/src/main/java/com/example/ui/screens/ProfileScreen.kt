@@ -1,8 +1,17 @@
 package com.example.ui.screens
 
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,18 +24,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.UserProfile
-import com.example.ui.theme.*
-import com.example.domain.sync.SyncState
-import com.example.ui.viewmodel.MainViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
+import com.example.data.model.UserProfile
+import com.example.domain.localization.AppStrings
+import com.example.domain.localization.LanguageCatalog
+import com.example.ui.theme.*
+import com.example.ui.viewmodel.MainViewModel
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,31 +58,85 @@ fun ProfileScreen(
     onClearData: () -> Unit,
     onManualSync: () -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val clipboardManager = LocalClipboardManager.current
-
-    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
-    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
-    val lastSyncTimestamp by viewModel.lastSyncTimestamp.collectAsStateWithLifecycle()
-    val syncStatusMessage by viewModel.syncStatusMessage.collectAsStateWithLifecycle()
-    val pendingSyncCount by viewModel.pendingSyncCount.collectAsStateWithLifecycle()
-    val syncTimeFormat = remember { SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")) }
+    val lastDriveBackupTime by viewModel.lastDriveBackupTime.collectAsStateWithLifecycle()
+    val backupDateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale("id", "ID")) }
 
     var showTargetEditDialog by remember { mutableStateOf(false) }
     var showProfileEditDialog by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
-    var showExportDialog by remember { mutableStateOf(false) }
-    var exportedJsonText by remember { mutableStateOf("") }
-    var showImportDialog by remember { mutableStateOf(false) }
-    var showFirebaseGuideDialog by remember { mutableStateOf(false) }
-    var showLogoutSwitchDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+
+    val currentLang = remember(userProfile.languageCode) {
+        LanguageCatalog.getLanguage(userProfile.languageCode)
+    }
+
+    // Photo Picker Launcher (Android Zero-Permission Photo Picker)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.saveProfileAvatar(uri)
+        }
+    }
+
+    // Create Document Launcher for Google Drive Backup (Export JSON)
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                val json = viewModel.getExportJson()
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(json.toByteArray(Charsets.UTF_8))
+                    }
+                    viewModel.recordDriveBackup()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // Open Document Launcher for Google Drive Restore (Import JSON)
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val json = context.contentResolver.openInputStream(uri)?.use { input ->
+                        input.bufferedReader().use { it.readText() }
+                    }
+                    if (!json.isNullOrBlank()) {
+                        viewModel.importRunsJson(json)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // Load custom profile photo bitmap if uploaded
+    val avatarBitmap = remember(userProfile.avatarUrl) {
+        if (userProfile.avatarUrl.isNotEmpty()) {
+            try {
+                val file = File(userProfile.avatarUrl)
+                if (file.exists()) {
+                    BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "Profil & Pengaturan",
+                        AppStrings.get("profile_title", userProfile.languageCode),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
@@ -85,7 +155,7 @@ fun ProfileScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Profile Header Card
+            // Profile Header Card (Pure Local Runner Profile with Photo Upload & Name Edit)
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -94,83 +164,111 @@ fun ProfileScreen(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Avatar with Camera Badge for Photo Upload
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clickable {
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
                         ) {
                             Surface(
-                                modifier = Modifier.size(68.dp),
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .align(Alignment.Center),
                                 shape = CircleShape,
-                                color = LimeGreenPrimary
+                                color = LimeGreenPrimary,
+                                border = BorderStroke(2.dp, LimeGreenDark)
+                            ) {
+                                if (avatarBitmap != null) {
+                                    Image(
+                                        bitmap = avatarBitmap,
+                                        contentDescription = "Foto Profil",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.DirectionsRun,
+                                            contentDescription = null,
+                                            tint = Color(0xFF09140D),
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Camera Icon Badge
+                            Surface(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .align(Alignment.BottomEnd),
+                                shape = CircleShape,
+                                color = LimeGreenDark,
+                                shadowElevation = 3.dp,
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.surfaceVariant)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Default.DirectionsRun,
-                                        contentDescription = null,
-                                        tint = Color(0xFF09140D),
-                                        modifier = Modifier.size(38.dp)
+                                        imageVector = Icons.Default.PhotoCamera,
+                                        contentDescription = "Ganti Foto Profil",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
                                     )
                                 }
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = userProfile.name,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = userProfile.email,
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
-                                ) {
-                                    Text(
-                                        text = "Akun Aktif • Offline-Ready",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-
-                            IconButton(onClick = { showProfileEditDialog = true }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit Profil")
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        // Runner Name & Edit Action
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = userProfile.name,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Pelari LariKita",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
                             OutlinedButton(
-                                onClick = { showLogoutSwitchDialog = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
+                                onClick = { showProfileEditDialog = true },
+                                modifier = Modifier.height(34.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                             ) {
-                                Icon(Icons.Default.SwitchAccount, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Ganti Akun / Masuk", fontSize = 12.sp)
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Edit Nama & Foto", fontSize = 12.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
                 }
             }
 
-            // Target Lari Card (Daily, Weekly, Monthly)
+            // Target Jarak Lari Card (Daily, Weekly, Monthly) - 3 Equal-width Columns
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -192,14 +290,18 @@ fun ProfileScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Target Jarak Lari",
+                                    text = AppStrings.get("running_targets", userProfile.languageCode),
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                             TextButton(onClick = { showTargetEditDialog = true }) {
-                                Text("Ubah", fontWeight = FontWeight.Bold, color = LimeGreenPrimary)
+                                Text(
+                                    AppStrings.get("btn_change", userProfile.languageCode),
+                                    fontWeight = FontWeight.Bold,
+                                    color = LimeGreenPrimary
+                                )
                             }
                         }
 
@@ -207,17 +309,29 @@ fun ProfileScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            TargetPill(label = "Target Harian", value = "%.0f km".format(userProfile.dailyTargetKm))
-                            TargetPill(label = "Target Mingguan", value = "%.0f km".format(userProfile.weeklyTargetKm))
-                            TargetPill(label = "Target Bulanan", value = "%.0f km".format(userProfile.monthlyTargetKm))
+                            TargetPill(
+                                label = AppStrings.get("target_daily", userProfile.languageCode),
+                                value = "%.0f %s".format(userProfile.dailyTargetKm, userProfile.distanceUnit),
+                                modifier = Modifier.weight(1f)
+                            )
+                            TargetPill(
+                                label = AppStrings.get("target_weekly", userProfile.languageCode),
+                                value = "%.0f %s".format(userProfile.weeklyTargetKm, userProfile.distanceUnit),
+                                modifier = Modifier.weight(1f)
+                            )
+                            TargetPill(
+                                label = AppStrings.get("target_monthly", userProfile.languageCode),
+                                value = "%.0f %s".format(userProfile.monthlyTargetKm, userProfile.distanceUnit),
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
             }
 
-            // Tampilan & Satuan
+            // Tampilan, Satuan & Bahasa Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -226,7 +340,7 @@ fun ProfileScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Pengaturan Tampilan & Satuan",
+                            text = AppStrings.get("display_units_title", userProfile.languageCode),
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurface
@@ -239,16 +353,28 @@ fun ProfileScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.DarkMode,
                                     contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
-                                    Text("Mode Gelap (Sporty Navy)", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                    Text("Hemat baterai & kontras tinggi saat lari", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        AppStrings.get("dark_mode", userProfile.languageCode),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        AppStrings.get("dark_mode_sub", userProfile.languageCode),
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                             Switch(
@@ -257,35 +383,110 @@ fun ProfileScreen(
                             )
                         }
 
-                        Divider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-                        // Unit
+                        // Distance Unit Toggle (km vs mi)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Straighten,
                                     contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text("Satuan Jarak", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Column {
+                                    Text(
+                                        AppStrings.get("distance_unit", userProfile.languageCode),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        if (userProfile.distanceUnit == "mi") "Miles (mi)" else "Kilometer (km)",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                            Text(
-                                text = "Kilometer (km, menit/km)",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = LimeGreenPrimary
-                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                FilterChip(
+                                    selected = userProfile.distanceUnit == "km",
+                                    onClick = { viewModel.setDistanceUnit("km") },
+                                    label = { Text("km", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = LimeGreenPrimary,
+                                        selectedLabelColor = Color(0xFF09140D)
+                                    )
+                                )
+                                FilterChip(
+                                    selected = userProfile.distanceUnit == "mi",
+                                    onClick = { viewModel.setDistanceUnit("mi") },
+                                    label = { Text("mi", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = LimeGreenPrimary,
+                                        selectedLabelColor = Color(0xFF09140D)
+                                    )
+                                )
+                            }
+                        }
+
+                        Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                        // Language Selector
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showLanguageDialog = true },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        AppStrings.get("app_language", userProfile.languageCode),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        "${currentLang.flag} ${currentLang.nativeName}",
+                                        fontSize = 12.sp,
+                                        color = LimeGreenDark,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+
+                            IconButton(onClick = { showLanguageDialog = true }) {
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    contentDescription = "Pilih Bahasa",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Backup, Offline Storage & Smart Sync
+            // COMPACT CADANGAN GOOGLE DRIVE CARD (Replaces the big Smart Sync section)
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -295,186 +496,85 @@ fun ProfileScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudSync,
-                                    contentDescription = null,
-                                    tint = PaceMetricColor,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                modifier = Modifier.size(36.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = PaceMetricColor.copy(alpha = 0.15f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudQueue,
+                                        contentDescription = null,
+                                        tint = PaceMetricColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Smart Sync (Firebase & Lokal)",
+                                    text = "Cadangan Google Drive",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                            }
-
-                            // Online / Offline Indicator Pill
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isOnline) Color(0xFFDCFCE7) else Color(0xFFFEF3C7)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isOnline) Color(0xFF16A34A) else Color(0xFFD97706))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (isOnline) "Online" else "Offline",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isOnline) Color(0xFF14532D) else Color(0xFF78350F)
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Sync metadata row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text("Antrean Belum Dicadangkan", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(
-                                    text = if (pendingSyncCount > 0) "$pendingSyncCount aktivitas" else "0 (Semua aman)",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (pendingSyncCount > 0) StatusWarning else LimeGreenDark
-                                )
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("Terakhir Disinkronkan", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    text = if (lastSyncTimestamp > 0) syncTimeFormat.format(Date(lastSyncTimestamp)) else "Belum pernah",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    text = if (lastDriveBackupTime > 0) {
+                                        "Terakhir: ${backupDateFormat.format(Date(lastDriveBackupTime))}"
+                                    } else {
+                                        "Belum pernah dicadangkan"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                        // Status message box
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.background,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = syncStatusMessage,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(8.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Action button: Sinkronkan Sekarang
-                        Button(
-                            onClick = { viewModel.triggerSmartSync() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            enabled = syncState != SyncState.SYNCING,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = LimeGreenPrimary,
-                                contentColor = Color(0xFF09140D)
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            if (syncState == SyncState.SYNCING) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color(0xFF09140D)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Menyinkronkan...", fontWeight = FontWeight.Bold)
-                            } else {
-                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Sinkronkan Sekarang", fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
+                        // Compact side-by-side action buttons
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = { viewModel.restoreFromCloud() },
+                            Button(
+                                onClick = {
+                                    val fileName = "larikita_backup_${SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())}.json"
+                                    createDocumentLauncher.launch(fileName)
+                                },
                                 modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = LimeGreenPrimary,
+                                    contentColor = Color(0xFF09140D)
+                                ),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Pulihkan Cloud", fontSize = 12.sp)
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Cadangkan ke Drive", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
 
                             OutlinedButton(
                                 onClick = {
-                                    coroutineScope.launch {
-                                        exportedJsonText = viewModel.getExportJson()
-                                        showExportDialog = true
-                                    }
+                                    openDocumentLauncher.launch(arrayOf("application/json", "*/*"))
                                 },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Ekspor JSON", fontSize = 12.sp)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { showImportDialog = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Pulihkan JSON", fontSize = 12.sp)
-                            }
-
-                            TextButton(
-                                onClick = { showFirebaseGuideDialog = true },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Panduan Spark", fontSize = 11.sp)
+                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pulihkan Cadangan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
 
-            // Developer / Testing Utilities
+            // Developer / Sample Data Utilities (Compact)
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -517,176 +617,348 @@ fun ProfileScreen(
                         }
                     }
                 }
+            }
+
+            // ABOUT APPLICATION CARD
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showAboutDialog = true }
+                        .testTag("about_app_card"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            shape = CircleShape,
+                            color = LimeGreenPrimary.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, LimeGreenPrimary)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = LimeGreenDark,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = AppStrings.get("about_app_title", userProfile.languageCode),
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "LariKita v1.0.0 • Rafline Dev",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Buka Tentang Aplikasi",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
 
-    // Export JSON Dialog
-    if (showExportDialog) {
-        AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text("Ekspor Data Cadangan") },
-            text = {
-                Column {
-                    Text(
-                        "Data riwayat aktivitas Anda dalam format JSON dapat dicopy dan disimpan sebagai file cadangan:",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = exportedJsonText,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 10.sp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        clipboardManager.setText(AnnotatedString(exportedJsonText))
-                        showExportDialog = false
-                    }
-                ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Salin ke Clipboard")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showExportDialog = false }) {
-                    Text("Tutup")
-                }
-            }
-        )
-    }
+    // EDIT PROFILE DIALOG (Name Edit & Photo Upload)
+    if (showProfileEditDialog) {
+        var nameInput by remember { mutableStateOf(userProfile.name) }
 
-    // Import / Restore JSON Dialog
-    if (showImportDialog) {
-        var importInput by remember { mutableStateOf("") }
         AlertDialog(
-            onDismissRequest = { showImportDialog = false },
-            title = { Text("Pulihkan Data dari JSON") },
-            text = {
-                Column {
-                    Text(
-                        "Tempelkan format JSON cadangan LariKita di bawah ini. Data akan otomatis digabungkan tanpa membuat duplikat:",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = importInput,
-                        onValueChange = { importInput = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        placeholder = { Text("[{\"id\": \"...\", \"distanceMeters\": ...}]", fontSize = 11.sp) },
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
-                    )
-                }
+            onDismissRequest = { showProfileEditDialog = false },
+            title = {
+                Text("Edit Profil Pelari", fontWeight = FontWeight.Bold)
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (importInput.isNotBlank()) {
-                            viewModel.importRunsJson(importInput)
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Avatar preview inside edit dialog
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(60.dp),
+                            shape = CircleShape,
+                            color = LimeGreenPrimary,
+                            border = BorderStroke(2.dp, LimeGreenDark)
+                        ) {
+                            if (avatarBitmap != null) {
+                                Image(
+                                    bitmap = avatarBitmap,
+                                    contentDescription = "Foto Profil",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsRun,
+                                        contentDescription = null,
+                                        tint = Color(0xFF09140D),
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
                         }
-                        showImportDialog = false
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Ganti Foto", fontSize = 12.sp)
+                        }
                     }
-                ) {
-                    Text("Pulihkan")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showImportDialog = false }) {
-                    Text("Batal")
-                }
-            }
-        )
-    }
 
-    // Firebase Cloud Guide Dialog
-    if (showFirebaseGuideDialog) {
-        AlertDialog(
-            onDismissRequest = { showFirebaseGuideDialog = false },
-            title = { Text("Panduan Integrasi Firebase Cloud") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "1. Offline-First: Aplikasi ini 100% berfungsi normal secara offline tanpa internet menggunakan Room SQLite.",
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        "2. Cloud Sync: Jika menghendaki cadangan akun online, hubungkan google-services.json dari Firebase Console ke proyek ini.",
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        "3. Keamanan Akun: Setiap sesi lari memiliki 'userId' tersendiri sehingga data antar akun terisolasi dan tidak bercampur.",
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        "4. Anti Duplikasi: Setiap aktivitas lari memiliki UUID unik. Sinkronisasi berulang kali tidak akan menghasilkan data ganda.",
-                        fontSize = 12.sp
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showFirebaseGuideDialog = false }) {
-                    Text("Mengerti", fontWeight = FontWeight.Bold)
-                }
-            }
-        )
-    }
-
-    // Logout / Switch Account Dialog
-    if (showLogoutSwitchDialog) {
-        var switchName by remember { mutableStateOf(userProfile.name) }
-        var switchEmail by remember { mutableStateOf(userProfile.email) }
-
-        AlertDialog(
-            onDismissRequest = { showLogoutSwitchDialog = false },
-            title = { Text("Ganti Akun Pelari") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Ubah profil atau beralih ke akun pelari lain. Data lokal tersimpan dengan aman.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     OutlinedTextField(
-                        value = switchName,
-                        onValueChange = { switchName = it },
-                        label = { Text("Nama Pengguna") },
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = switchEmail,
-                        onValueChange = { switchEmail = it },
-                        label = { Text("Email Akun") },
-                        singleLine = true
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("Nama Pelari") },
+                        placeholder = { Text("Contoh: Rendy") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.updateProfile(userProfile.copy(name = switchName, email = switchEmail))
-                        showLogoutSwitchDialog = false
-                    }
+                        if (nameInput.isNotBlank()) {
+                            viewModel.updateUserName(nameInput)
+                        }
+                        showProfileEditDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    )
                 ) {
-                    Text("Beralih Akun")
+                    Text("Simpan", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showLogoutSwitchDialog = false }) {
+                TextButton(onClick = { showProfileEditDialog = false }) {
                     Text("Batal")
+                }
+            }
+        )
+    }
+
+    // ABOUT APPLICATION DIALOG
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape,
+                        border = BorderStroke(1.dp, LimeGreenPrimary)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_larikita_logo),
+                            contentDescription = "Logo LariKita",
+                            modifier = Modifier.fillMaxSize().padding(2.dp).clip(CircleShape)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text("LariKita", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("GPS Running Tracker", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = AppStrings.get("app_description", userProfile.languageCode),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    // Version Info
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(AppStrings.get("app_version", userProfile.languageCode), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("v1.0.0 (Build 2026.11)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LimeGreenDark)
+                    }
+
+                    // Publisher / Developer Info (Rafline Dev)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(AppStrings.get("app_publisher", userProfile.languageCode), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = LimeGreenPrimary.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, LimeGreenPrimary.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                text = "Rafline Dev",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LimeGreenDark,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    Text(
+                        text = "© 2026 Rafline Dev. Semua Hak Dilindungi.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showAboutDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    )
+                ) {
+                    Text(AppStrings.get("btn_close", userProfile.languageCode), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // MULTI-LANGUAGE PICKER DIALOG
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Language, contentDescription = null, tint = LimeGreenDark)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(AppStrings.get("select_language", userProfile.languageCode), fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(350.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val grouped = LanguageCatalog.supportedLanguages.groupBy { it.region }
+                    grouped.forEach { (region, langs) ->
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)
+                            ) {
+                                Text(
+                                    text = region.uppercase(),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        items(langs) { lang ->
+                            val isSelected = userProfile.languageCode.equals(lang.code, ignoreCase = true)
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.setLanguage(lang.code)
+                                        showLanguageDialog = false
+                                    },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) LimeGreenPrimary.copy(alpha = 0.2f) else Color.Transparent,
+                                border = if (isSelected) BorderStroke(1.dp, LimeGreenPrimary) else null
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(lang.flag, fontSize = 20.sp)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = lang.nativeName,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = lang.name,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = LimeGreenDark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
+                    Text(AppStrings.get("btn_close", userProfile.languageCode))
                 }
             }
         )
@@ -700,27 +972,27 @@ fun ProfileScreen(
 
         AlertDialog(
             onDismissRequest = { showTargetEditDialog = false },
-            title = { Text("Atur Target Lari") },
+            title = { Text(AppStrings.get("running_targets", userProfile.languageCode)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = dailyInput,
                         onValueChange = { dailyInput = it },
-                        label = { Text("Target Harian (km)") },
+                        label = { Text("${AppStrings.get("target_daily", userProfile.languageCode)} (${userProfile.distanceUnit})") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = weeklyInput,
                         onValueChange = { weeklyInput = it },
-                        label = { Text("Target Mingguan (km)") },
+                        label = { Text("${AppStrings.get("target_weekly", userProfile.languageCode)} (${userProfile.distanceUnit})") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = monthlyInput,
                         onValueChange = { monthlyInput = it },
-                        label = { Text("Target Bulanan (km)") },
+                        label = { Text("${AppStrings.get("target_monthly", userProfile.languageCode)} (${userProfile.distanceUnit})") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true
                     )
@@ -736,54 +1008,12 @@ fun ProfileScreen(
                         showTargetEditDialog = false
                     }
                 ) {
-                    Text("Simpan", fontWeight = FontWeight.Bold)
+                    Text(AppStrings.get("btn_save", userProfile.languageCode), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showTargetEditDialog = false }) {
-                    Text("Batal")
-                }
-            }
-        )
-    }
-
-    // Edit Profile Dialog
-    if (showProfileEditDialog) {
-        var nameInput by remember { mutableStateOf(userProfile.name) }
-        var emailInput by remember { mutableStateOf(userProfile.email) }
-
-        AlertDialog(
-            onDismissRequest = { showProfileEditDialog = false },
-            title = { Text("Edit Profil Pelari") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = nameInput,
-                        onValueChange = { nameInput = it },
-                        label = { Text("Nama Pelari") },
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = emailInput,
-                        onValueChange = { emailInput = it },
-                        label = { Text("Email") },
-                        singleLine = true
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.updateProfile(userProfile.copy(name = nameInput, email = emailInput))
-                        showProfileEditDialog = false
-                    }
-                ) {
-                    Text("Simpan", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showProfileEditDialog = false }) {
-                    Text("Batal")
+                    Text(AppStrings.get("btn_cancel", userProfile.languageCode))
                 }
             }
         )
@@ -808,7 +1038,7 @@ fun ProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirmDialog = false }) {
-                    Text("Batal")
+                    Text(AppStrings.get("btn_cancel", userProfile.languageCode))
                 }
             }
         )
@@ -816,18 +1046,36 @@ fun ProfileScreen(
 }
 
 @Composable
-fun TargetPill(label: String, value: String) {
+fun TargetPill(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.padding(2.dp)
+        modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(text = label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text = value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = LimeGreenPrimary)
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = LimeGreenDark,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

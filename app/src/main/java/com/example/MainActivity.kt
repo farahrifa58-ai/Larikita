@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.db.RunEntity
+import com.example.domain.localization.AppStrings
 import com.example.ui.screens.*
 import com.example.ui.theme.LariKitaTheme
 import com.example.ui.theme.LimeGreenPrimary
@@ -67,10 +68,11 @@ class MainActivity : ComponentActivity() {
             }
 
             val navItems = listOf(
-                NavItem(AppScreen.BERANDA, "Beranda", Icons.Default.Home, Icons.Outlined.Home),
-                NavItem(AppScreen.LARI, "Lari", Icons.Default.DirectionsRun, Icons.Outlined.DirectionsRun),
-                NavItem(AppScreen.STATISTIK, "Statistik", Icons.Default.BarChart, Icons.Outlined.BarChart),
-                NavItem(AppScreen.PROFIL, "Profil", Icons.Default.Person, Icons.Outlined.Person)
+                NavItem(AppScreen.BERANDA, AppStrings.get("nav_home", userProfile.languageCode), Icons.Default.Home, Icons.Outlined.Home),
+                NavItem(AppScreen.RIWAYAT, AppStrings.get("nav_history", userProfile.languageCode), Icons.Default.History, Icons.Outlined.History),
+                NavItem(AppScreen.LARI, AppStrings.get("nav_run", userProfile.languageCode), Icons.Default.DirectionsRun, Icons.Outlined.DirectionsRun),
+                NavItem(AppScreen.STATISTIK, AppStrings.get("nav_stats", userProfile.languageCode), Icons.Default.BarChart, Icons.Outlined.BarChart),
+                NavItem(AppScreen.PROFIL, AppStrings.get("nav_profile", userProfile.languageCode), Icons.Default.Person, Icons.Outlined.Person)
             )
 
             var showSplash by remember { mutableStateOf(true) }
@@ -102,8 +104,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 ) {
                                     navItems.forEach { item ->
-                                        val isSelected = currentScreen == item.screen ||
-                                                (item.screen == AppScreen.BERANDA && currentScreen == AppScreen.RIWAYAT)
+                                        val isSelected = currentScreen == item.screen
                                         NavigationRailItem(
                                             selected = isSelected,
                                             onClick = {
@@ -157,8 +158,7 @@ class MainActivity : ComponentActivity() {
                                         tonalElevation = 8.dp
                                     ) {
                                         navItems.forEach { item ->
-                                            val isSelected = currentScreen == item.screen ||
-                                                    (item.screen == AppScreen.BERANDA && currentScreen == AppScreen.RIWAYAT)
+                                            val isSelected = currentScreen == item.screen
                                             NavigationBarItem(
                                                 selected = isSelected,
                                                 onClick = {

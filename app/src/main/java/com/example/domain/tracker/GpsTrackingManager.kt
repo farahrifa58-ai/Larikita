@@ -75,6 +75,7 @@ class GpsTrackingManager(
     private var totalDistanceMeters: Double = 0.0
     private var maxSpeedKmH: Double = 0.0
     private var activeRunId: String = ""
+    private var consecutiveRejects: Int = 0
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -307,6 +308,17 @@ class GpsTrackingManager(
             altitude = location.altitude
         )
 
+        // For the very first anchor point, only accept if accuracy is reasonable (<= 35m)
+        if (lastRecordedPoint == null) {
+            if (accuracy <= 35.0f) {
+                recordedPoints.add(candidate)
+                lastRecordedPoint = candidate
+                consecutiveRejects = 0
+            }
+            updateMetrics(gpsStatus, isWeak, candidate)
+            return
+        }
+
         val (isValid, deltaDistance) = HaversineCalculator.isValidRunMovement(
             prev = lastRecordedPoint,
             current = candidate,
@@ -315,6 +327,7 @@ class GpsTrackingManager(
         )
 
         if (isValid) {
+            consecutiveRejects = 0
             totalDistanceMeters += deltaDistance
             recordedPoints.add(candidate)
             lastRecordedPoint = candidate
@@ -323,6 +336,20 @@ class GpsTrackingManager(
             val instSpeedKmH = (candidate.speed * 3.6).toDouble()
             if (instSpeedKmH > maxSpeedKmH && instSpeedKmH < 45.0) {
                 maxSpeedKmH = instSpeedKmH
+            }
+        } else {
+            // Self-healing recovery: If candidate is accurate (<= 25m) but was rejected,
+            // the initial anchor or previous point may have been an early jitter/teleport anomaly.
+            if (accuracy in 0.1f..25.0f) {
+                consecutiveRejects++
+                if (consecutiveRejects >= 2 || recordedPoints.size <= 1) {
+                    if (recordedPoints.size <= 1) {
+                        recordedPoints.clear()
+                    }
+                    recordedPoints.add(candidate)
+                    lastRecordedPoint = candidate
+                    consecutiveRejects = 0
+                }
             }
         }
 
@@ -426,9 +453,10 @@ class GpsTrackingManager(
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
         try {
-            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1500)
-                .setMinUpdateIntervalMillis(1000)
-                .setMinUpdateDistanceMeters(1.5f)
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                .setMinUpdateIntervalMillis(500)
+                .setMinUpdateDistanceMeters(1.0f)
+                .setWaitForAccurateLocation(true)
                 .build()
 
             fusedLocationClient.requestLocationUpdates(
@@ -444,7 +472,7 @@ class GpsTrackingManager(
                     lm.requestLocationUpdates(
                         LocationManager.GPS_PROVIDER,
                         1000L,
-                        1.5f,
+                        1.0f,
                         nativeLocationListener,
                         Looper.getMainLooper()
                     )
@@ -459,17 +487,52 @@ class GpsTrackingManager(
                 }
             }
 
-            // Try getting last known location as initial anchor
-            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                if (loc != null && recordedPoints.isEmpty()) {
-                    handleNewLocation(loc)
+            // Immediately query fresh high-accuracy location
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { loc ->
+                    if (loc != null && loc.accuracy <= 25.0f && (System.currentTimeMillis() - loc.time) < 10000) {
+                        handleNewLocation(loc)
+                    }
                 }
-            }
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(
                 gpsStatusMessage = "Gagal mengaktifkan sensor GPS: ${e.localizedMessage}"
             )
         }
+    }
+
+    /**
+     * Pre-warms GPS hardware so satellite lock is already acquired before user starts running.
+     */
+    @SuppressLint("MissingPermission")
+    fun warmUpGps() {
+        try {
+            if (isGpsEnabled()) {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { loc ->
+                        if (loc != null && !_uiState.value.isTracking) {
+                            val pt = GpsPoint(
+                                latitude = loc.latitude,
+                                longitude = loc.longitude,
+                                timestamp = loc.time,
+                                accuracy = loc.accuracy,
+                                speed = if (loc.hasSpeed()) loc.speed else 0f,
+                                altitude = loc.altitude
+                            )
+                            val gpsMsg = when {
+                                loc.accuracy <= 10.0f -> "GPS Sangat Akurat (±${loc.accuracy.toInt()}m)"
+                                loc.accuracy <= 25.0f -> "GPS Akurat (±${loc.accuracy.toInt()}m)"
+                                else -> "GPS Siap (±${loc.accuracy.toInt()}m)"
+                            }
+                            _uiState.value = _uiState.value.copy(
+                                currentPoint = pt,
+                                gpsAccuracyMeters = loc.accuracy,
+                                gpsStatusMessage = gpsMsg
+                            )
+                        }
+                    }
+            }
+        } catch (_: Exception) {}
     }
 
     private fun stopLocationUpdates() {
