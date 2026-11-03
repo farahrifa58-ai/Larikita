@@ -1,0 +1,6 @@
+{
+  "name": "LariKita",
+  "description": "Aplikasi GPS Running Tracker modern dan ringan untuk pelari dengan pencatatan rute interaktif, offline-first, analisis statistik, dan target latihan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

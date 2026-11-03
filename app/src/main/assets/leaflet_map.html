@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LariKita Live Map</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #09120E;
+            color: #F4F7F5;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            background-color: #0B1914;
+        }
+        /* Custom dark tile filter for sporty look */
+        .leaflet-tile {
+            filter: brightness(0.65) invert(1) contrast(3) hue-rotate(180deg) saturate(0.35);
+        }
+        .user-pulse-marker {
+            width: 22px;
+            height: 22px;
+            background: #A3E635;
+            border: 3px solid #09120E;
+            border-radius: 50%;
+            box-shadow: 0 0 12px #A3E635, 0 0 24px rgba(163, 230, 53, 0.6);
+            animation: pulse-ring 1.8s infinite;
+        }
+        .start-marker {
+            width: 18px;
+            height: 18px;
+            background: #22C55E;
+            border: 3px solid #FFFFFF;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+        }
+        .end-marker {
+            width: 18px;
+            height: 18px;
+            background: #EF4444;
+            border: 3px solid #FFFFFF;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(163, 230, 53, 0.8); }
+            70% { transform: scale(1.1); box-shadow: 0 0 0 14px rgba(163, 230, 53, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(163, 230, 53, 0); }
+        }
+        .offline-notice {
+            position: absolute;
+            bottom: 12px;
+            left: 12px;
+            z-index: 1000;
+            background: rgba(15, 25, 20, 0.85);
+            border: 1px solid #2B473A;
+            color: #9BB1A6;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            backdrop-filter: blur(4px);
+            pointer-events: none;
+        }
+        .leaflet-control-attribution {
+            background: rgba(9, 18, 14, 0.7) !important;
+            color: #627D70 !important;
+            font-size: 9px !important;
+        }
+        .leaflet-control-attribution a {
+            color: #84CC16 !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="offlineNotice" class="offlineNotice" style="display:none;">Mode Offline (Rute GPS Tetap Dicatat)</div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        var map = null;
+        var routePolyline = null;
+        var userMarker = null;
+        var startMarker = null;
+        var endMarker = null;
+        var followUser = true;
+        var routeCoords = [];
+
+        function initMap(lat, lon, zoom) {
+            if (map) return;
+            try {
+                map = L.map('map', {
+                    zoomControl: false,
+                    attributionControl: true
+                }).setView([lat, lon], zoom || 16);
+
+                L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap | LariKita'
+                }).addTo(map);
+
+                // Add polyline for running path
+                routePolyline = L.polyline([], {
+                    color: '#A3E635',
+                    weight: 6,
+                    opacity: 0.95,
+                    lineJoin: 'round',
+                    lineCap: 'round',
+                    smoothFactor: 1.0
+                }).addTo(map);
+
+                // Glow backdrop line
+                var glowLine = L.polyline([], {
+                    color: '#14532D',
+                    weight: 10,
+                    opacity: 0.5,
+                    lineJoin: 'round'
+                }).addTo(map);
+                routePolyline.glowLine = glowLine;
+
+                updateUserPosition(lat, lon);
+            } catch (e) {
+                console.error("Map init error:", e);
+                document.getElementById('offlineNotice').style.display = 'block';
+            }
+        }
+
+        function updateUserPosition(lat, lon) {
+            if (!map) {
+                initMap(lat, lon, 16);
+                return;
+            }
+            var latLng = [lat, lon];
+            if (!userMarker) {
+                var icon = L.divIcon({
+                    className: 'user-pulse-marker',
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11]
+                });
+                userMarker = L.marker(latLng, { icon: icon }).addTo(map);
+            } else {
+                userMarker.setLatLng(latLng);
+            }
+
+            if (followUser) {
+                map.panTo(latLng, { animate: true, duration: 0.5 });
+            }
+        }
+
+        function addPoint(lat, lon) {
+            if (!map) initMap(lat, lon, 16);
+            var latLng = [lat, lon];
+            routeCoords.push(latLng);
+
+            // Add start marker if this is first point
+            if (routeCoords.length === 1 && !startMarker) {
+                var startIcon = L.divIcon({
+                    className: 'start-marker',
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9]
+                });
+                startMarker = L.marker(latLng, { icon: startIcon }).addTo(map);
+            }
+
+            if (routePolyline) {
+                routePolyline.setLatLngs(routeCoords);
+                if (routePolyline.glowLine) {
+                    routePolyline.glowLine.setLatLngs(routeCoords);
+                }
+            }
+            updateUserPosition(lat, lon);
+        }
+
+        function setFullRoute(coordsJson, showEndMarker) {
+            try {
+                var points = (typeof coordsJson === 'string') ? JSON.parse(coordsJson) : coordsJson;
+                if (!points || points.length === 0) return;
+
+                routeCoords = [];
+                for (var i = 0; i < points.length; i++) {
+                    var p = points[i];
+                    routeCoords.push([p.latitude || p.lat, p.longitude || p.lon]);
+                }
+
+                if (!map) {
+                    initMap(routeCoords[0][0], routeCoords[0][1], 15);
+                }
+
+                if (routePolyline) {
+                    routePolyline.setLatLngs(routeCoords);
+                    if (routePolyline.glowLine) routePolyline.glowLine.setLatLngs(routeCoords);
+                }
+
+                // Add start marker
+                if (routeCoords.length > 0) {
+                    if (startMarker) map.removeLayer(startMarker);
+                    startMarker = L.marker(routeCoords[0], {
+                        icon: L.divIcon({ className: 'start-marker', iconSize: [18, 18], iconAnchor: [9, 9] })
+                    }).addTo(map);
+                }
+
+                // Add end marker if requested
+                if (showEndMarker && routeCoords.length > 1) {
+                    if (endMarker) map.removeLayer(endMarker);
+                    var lastPt = routeCoords[routeCoords.length - 1];
+                    endMarker = L.marker(lastPt, {
+                        icon: L.divIcon({ className: 'end-marker', iconSize: [18, 18], iconAnchor: [9, 9] })
+                    }).addTo(map);
+                }
+
+                fitRouteBounds();
+            } catch (e) {
+                console.error("setFullRoute error:", e);
+            }
+        }
+
+        function fitRouteBounds() {
+            if (!map || routeCoords.length === 0) return;
+            try {
+                var bounds = L.latLngBounds(routeCoords);
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+            } catch (e) {
+                console.error("fitRouteBounds error:", e);
+            }
+        }
+
+        function setFollowUser(enable) {
+            followUser = enable;
+        }
+
+        // Initialize default view (Monas Jakarta fallback center)
+        window.onload = function() {
+            setTimeout(function() {
+                if (!map) {
+                    initMap(-6.1754, 106.8272, 14);
+                }
+            }, 200);
+        };
+    </script>
+</body>
+</html>
