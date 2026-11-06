@@ -58,4 +58,15 @@ class ExampleUnitTest {
         assertTrue("Valid running movement should be accepted", isValid3)
         assertTrue(dist > 5.0)
     }
+
+    @Test
+    fun testLocationPrivacyFiltering() {
+        val locInfo = com.example.ui.util.RunLocationInfo(
+            fullAddress = "Panggung Rejo, Kabupaten Pringsewu",
+            cityOnly = "Kabupaten Pringsewu"
+        )
+        assertEquals("Panggung Rejo, Kabupaten Pringsewu", locInfo.getDisplayText(com.example.ui.util.LocationPrivacyLevel.FULL))
+        assertEquals("Kabupaten Pringsewu", locInfo.getDisplayText(com.example.ui.util.LocationPrivacyLevel.CITY_ONLY))
+        assertNull(locInfo.getDisplayText(com.example.ui.util.LocationPrivacyLevel.HIDDEN))
+    }
 }

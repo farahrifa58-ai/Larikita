@@ -38,6 +38,7 @@ fun RunSummaryScreen(
 
     var titleText by remember { mutableStateOf(run.title) }
     var notesText by remember { mutableStateOf(run.notes) }
+    var showShareDialog by remember { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("EEEE, dd MMMM yyyy", Locale("id", "ID")) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale("id", "ID")) }
 
@@ -297,6 +298,22 @@ fun RunSummaryScreen(
 
             // Action Buttons
             item {
+                // Share Achievement Button (Camera Selfie, Card with Route, Location Privacy)
+                FilledTonalButton(
+                    onClick = { showShareDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("summary_share_button"),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, tint = LimeGreenPrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("BAGIKAN PENCAPAIAN / FOTO SELFIE", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 Button(
                     onClick = {
                         onSaveRun(titleText, notesText)
@@ -346,5 +363,12 @@ fun RunSummaryScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
+    }
+
+    if (showShareDialog) {
+        com.example.ui.components.RunShareDialog(
+            run = run.copy(title = titleText, notes = notesText),
+            onDismiss = { showShareDialog = false }
+        )
     }
 }
