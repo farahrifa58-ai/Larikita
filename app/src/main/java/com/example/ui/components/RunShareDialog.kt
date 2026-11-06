@@ -57,6 +57,7 @@ fun RunShareDialog(
     var locationInfo by remember { mutableStateOf(RunLocationInfo("Memuat lokasi...", "...")) }
     var capturedPhotoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showPhotoOverlayPreview by remember { mutableStateOf(false) }
+    var mapDisplayMode by remember { mutableStateOf(0) } // 0: OpenStreetMap Real Map, 1: Vektor Sporty
 
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale("id", "ID")) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale("id", "ID")) }
@@ -414,37 +415,82 @@ fun RunShareDialog(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // THE GPS ROUTE MAP PREVIEW
+                        // THE GPS ROUTE MAP PREVIEW (REAL MAPS WITH OPENSTREETMAP OR SPORTY VECTOR)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(115.dp)
+                                .height(150.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color(0xFF090E15))
                                 .border(1.dp, Color(0xFF1E2D3D), RoundedCornerShape(12.dp))
                         ) {
                             if (privacyOptions.showRouteMap && points.size >= 2) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    RouteMapDrawer.drawRouteInCompose(
-                                        drawScope = this,
+                                if (mapDisplayMode == 0) {
+                                    // Real OpenStreetMap tiles showing actual streets, roads, and neighborhoods
+                                    LeafletMapView(
+                                        modifier = Modifier.fillMaxSize(),
                                         points = points,
-                                        showRoute = true
+                                        currentPoint = null,
+                                        isLiveTracking = false,
+                                        showEndMarker = true
                                     )
+                                } else {
+                                    // Realistic vector route with geographic proportions, scale bar, and compass
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        RouteMapDrawer.drawRouteInCompose(
+                                            drawScope = this,
+                                            points = points,
+                                            showRoute = true
+                                        )
+                                    }
                                 }
+
+                                // Bottom badge
                                 Surface(
-                                    color = Color(0xAA000000),
-                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xCC09120E),
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, LimeGreenPrimary.copy(alpha = 0.4f)),
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
-                                        .padding(6.dp)
+                                        .padding(8.dp)
                                 ) {
                                     Text(
-                                        text = "📍 Jalur Maps Terlampir",
+                                        text = if (mapDisplayMode == 0) "🗺️ Peta Nyata OpenStreetMap" else "📍 Jalur Rute Akurat",
                                         color = LimeGreenPrimary,
-                                        fontSize = 9.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                     )
+                                }
+
+                                // Top switch mode button
+                                Surface(
+                                    color = Color(0xDD09120E),
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(8.dp)
+                                        .clickable { mapDisplayMode = if (mapDisplayMode == 0) 1 else 0 }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (mapDisplayMode == 0) Icons.Default.ShowChart else Icons.Default.Map,
+                                            contentDescription = null,
+                                            tint = Color(0xFF38BDF8),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (mapDisplayMode == 0) "Gaya Vektor" else "Peta Jalan OSM",
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             } else if (!privacyOptions.showRouteMap) {
                                 Box(

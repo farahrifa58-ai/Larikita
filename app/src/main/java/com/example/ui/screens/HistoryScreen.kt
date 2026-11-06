@@ -47,6 +47,8 @@ fun HistoryScreen(
     var selectedRunForDetail by remember { mutableStateOf<RunEntity?>(null) }
     var runToDelete by remember { mutableStateOf<RunEntity?>(null) }
     var runToShare by remember { mutableStateOf<RunEntity?>(null) }
+    val isTrial = remember { com.example.domain.config.EditionConfig.isTrial(context) }
+    var showTrialShareNoticeDialog by remember { mutableStateOf(false) }
 
     // Filter runs
     val filteredRuns = remember(runs, currentFilter) {
@@ -202,16 +204,46 @@ fun HistoryScreen(
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(
-                                        onClick = { runToShare = run },
-                                        modifier = Modifier.size(36.dp).testTag("share_run_${run.id}")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Share,
-                                            contentDescription = "Bagikan",
-                                            tint = LimeGreenPrimary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                    if (!isTrial) {
+                                        IconButton(
+                                            onClick = { runToShare = run },
+                                            modifier = Modifier.size(36.dp).testTag("share_run_${run.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Share,
+                                                contentDescription = "Bagikan",
+                                                tint = LimeGreenPrimary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Surface(
+                                            modifier = Modifier
+                                                .clickable { showTrialShareNoticeDialog = true }
+                                                .padding(end = 4.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, LimeGreenPrimary.copy(alpha = 0.5f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Lock,
+                                                    contentDescription = null,
+                                                    tint = LimeGreenDark,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Share: Full Version",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = LimeGreenDark
+                                                )
+                                            }
+                                        }
                                     }
 
                                     IconButton(
@@ -330,21 +362,98 @@ fun HistoryScreen(
                 }
             },
             confirmButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            val r = selectedRunForDetail
-                            selectedRunForDetail = null
-                            runToShare = r
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!isTrial) {
+                        TextButton(
+                            onClick = {
+                                val r = selectedRunForDetail
+                                selectedRunForDetail = null
+                                runToShare = r
+                            }
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Bagikan", fontWeight = FontWeight.Bold, color = LimeGreenPrimary)
                         }
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Bagikan", fontWeight = FontWeight.Bold, color = LimeGreenPrimary)
+                    } else {
+                        TextButton(
+                            onClick = {
+                                showTrialShareNoticeDialog = true
+                            }
+                        ) {
+                            Icon(Icons.Outlined.Lock, contentDescription = null, tint = LimeGreenDark, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Share (Khusus Full)", fontWeight = FontWeight.Bold, color = LimeGreenDark)
+                        }
                     }
                     TextButton(onClick = { selectedRunForDetail = null }) {
                         Text("Tutup", fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        )
+    }
+
+    // Friendly Upgrade to Full Version Dialog (Calm colors, NO RED)
+    if (showTrialShareNoticeDialog) {
+        AlertDialog(
+            onDismissRequest = { showTrialShareNoticeDialog = false },
+            icon = {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = LimeGreenPrimary.copy(alpha = 0.2f),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Outlined.Lock,
+                            contentDescription = null,
+                            tint = LimeGreenDark,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Fitur Berbagi Khusus Full Version",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Fitur berbagi rute, pencapaian lari, dan kartu foto ke media sosial hanya tersedia di Full Version LariKita.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Silakan perbarui ke Full Version untuk menikmati fitur berbagi tanpa batas bersama komunitas pelari Anda.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showTrialShareNoticeDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Mengerti", fontWeight = FontWeight.Bold)
                 }
             }
         )

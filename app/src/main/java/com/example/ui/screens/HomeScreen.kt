@@ -53,8 +53,63 @@ fun HomeScreen(
     onViewHistory: () -> Unit,
     onSelectRunDetail: (RunEntity) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isTrial = remember { com.example.domain.config.EditionConfig.isTrial(context) }
+    var showTrialExpiredDialog by remember { mutableStateOf(false) }
+
     val weeklyStats = remember(allRuns, userProfile.weeklyTargetKm) {
         viewModel.calculateWeeklyStats(allRuns, userProfile.weeklyTargetKm)
+    }
+
+    val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fine = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarse = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fine || coarse) {
+            viewModel.trackingManager.warmUpGps()
+            onStartRun(false)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (hasFine) {
+            viewModel.trackingManager.warmUpGps()
+        }
+    }
+
+    val handleStartRun: (Boolean) -> Unit = { isSimulation ->
+        if (com.example.domain.config.EditionConfig.isTrial(context) &&
+            com.example.domain.config.EditionConfig.isTrialExpired(context)
+        ) {
+            showTrialExpiredDialog = true
+        } else if (isSimulation) {
+            onStartRun(true)
+        } else {
+            val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+            if (hasFine || hasCoarse) {
+                onStartRun(false)
+            } else {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            }
+        }
     }
 
     Scaffold(
@@ -132,6 +187,58 @@ fun HomeScreen(
                                     .padding(4.dp)
                                     .clip(CircleShape)
                             )
+                        }
+                    }
+                }
+            }
+
+            // Trial Info Card (Shown only in Trial mode, NEVER in Full Version)
+            if (isTrial) {
+                item {
+                    val remainingTimeStr = remember { com.example.domain.config.EditionConfig.formatRemainingTrialTime(context) }
+                    val isExpired = remember { com.example.domain.config.EditionConfig.isTrialExpired(context) }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, LimeGreenPrimary.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = LimeGreenPrimary.copy(alpha = 0.2f),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Timer,
+                                        contentDescription = null,
+                                        tint = LimeGreenDark,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (isExpired) "Versi Trial • Masa Berlaku Habis" else "Versi Trial • Batas 1.0 km per lari",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = remainingTimeStr,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -283,7 +390,7 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Button(
-                                    onClick = { onStartRun(false) },
+                                    onClick = { handleStartRun(false) },
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(52.dp)
@@ -308,7 +415,7 @@ fun HomeScreen(
                                 }
 
                                 OutlinedButton(
-                                    onClick = { onStartRun(true) },
+                                    onClick = { handleStartRun(true) },
                                     modifier = Modifier
                                         .height(52.dp)
                                         .testTag("simulasi_lari_button"),
@@ -523,6 +630,70 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    if (showTrialExpiredDialog) {
+        AlertDialog(
+            onDismissRequest = { showTrialExpiredDialog = false },
+            icon = {
+                Surface(
+                    shape = CircleShape,
+                    color = LimeGreenPrimary.copy(alpha = 0.2f),
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = LimeGreenDark,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Masa Uji Coba Selesai",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Masa percobaan 24 jam untuk Versi Trial telah berakhir. Terima kasih telah mencoba aplikasi LariKita!",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Silakan perbarui ke Full Version untuk menikmati akses lari selamanya tanpa batas jarak 1 km dan fitur berbagi riwayat lari.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showTrialExpiredDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Mengerti", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }
 

@@ -660,8 +660,9 @@ fun ProfileScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            val isTrialMode = remember { com.example.domain.config.EditionConfig.isTrial(context) }
                             Text(
-                                text = "LariKita v1.0.0 • Rafline Dev",
+                                text = "LariKita v1.0.0 • Rafline Dev • ${if (isTrialMode) "Trial Version" else "Full Version"}",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -810,7 +811,62 @@ fun ProfileScreen(
                         lineHeight = 16.sp
                     )
 
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    // Edition & License Info (Keterangan Full Version / Trial)
+                    val isTrial = remember { com.example.domain.config.EditionConfig.isTrial(context) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Edisi Aplikasi", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = LimeGreenPrimary.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, LimeGreenPrimary.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                text = if (isTrial) "Trial Version (24 Jam)" else "Full Version",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LimeGreenDark,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Status Lisensi", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = if (isTrial) "Uji Coba 24 Jam • Batas 1 km" else "Aktif Selamanya (Tanpa Batas)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    if (isTrial) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Sisa Waktu Trial", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = com.example.domain.config.EditionConfig.formatRemainingTrialTime(context),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = LimeGreenDark
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
                     // Version Info
                     Row(
@@ -844,7 +900,34 @@ fun ProfileScreen(
                         }
                     }
 
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    // Quick Toggle for emulator testing (Trial <-> Full)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Ganti Mode Uji:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(
+                            onClick = {
+                                com.example.domain.config.EditionConfig.setEditionOverride(context, !isTrial)
+                                showAboutDialog = false
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text(
+                                text = if (isTrial) "Beralih ke Full" else "Beralih ke Trial",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LimeGreenDark
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
                     Text(
                         text = "© 2026 Rafline Dev. Semua Hak Dilindungi.",

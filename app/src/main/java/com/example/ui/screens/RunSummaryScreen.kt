@@ -39,6 +39,9 @@ fun RunSummaryScreen(
     var titleText by remember { mutableStateOf(run.title) }
     var notesText by remember { mutableStateOf(run.notes) }
     var showShareDialog by remember { mutableStateOf(false) }
+    var showTrialShareNoticeDialog by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isTrial = remember { com.example.domain.config.EditionConfig.isTrial(context) }
     val dateFormat = remember { SimpleDateFormat("EEEE, dd MMMM yyyy", Locale("id", "ID")) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale("id", "ID")) }
 
@@ -299,17 +302,35 @@ fun RunSummaryScreen(
             // Action Buttons
             item {
                 // Share Achievement Button (Camera Selfie, Card with Route, Location Privacy)
-                FilledTonalButton(
-                    onClick = { showShareDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("summary_share_button"),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, tint = LimeGreenPrimary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("BAGIKAN PENCAPAIAN / FOTO SELFIE", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                if (!isTrial) {
+                    FilledTonalButton(
+                        onClick = { showShareDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("summary_share_button"),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = LimeGreenPrimary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("BAGIKAN PENCAPAIAN / FOTO SELFIE", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { showTrialShareNoticeDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("summary_share_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = LimeGreenDark
+                        )
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = LimeGreenDark, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("BAGIKAN PENCAPAIAN (KHUSUS FULL VERSION)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -369,6 +390,70 @@ fun RunSummaryScreen(
         com.example.ui.components.RunShareDialog(
             run = run.copy(title = titleText, notes = notesText),
             onDismiss = { showShareDialog = false }
+        )
+    }
+
+    // Friendly Upgrade to Full Version Dialog (Calm colors, NO RED)
+    if (showTrialShareNoticeDialog) {
+        AlertDialog(
+            onDismissRequest = { showTrialShareNoticeDialog = false },
+            icon = {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = LimeGreenPrimary.copy(alpha = 0.2f),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = LimeGreenDark,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Fitur Berbagi Khusus Full Version",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Fitur berbagi rute, pencapaian lari, dan kartu foto ke media sosial hanya tersedia di Full Version LariKita.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Silakan perbarui ke Full Version untuk menikmati fitur berbagi tanpa batas bersama komunitas pelari Anda.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showTrialShareNoticeDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Mengerti", fontWeight = FontWeight.Bold)
+                }
+            }
         )
     }
 }

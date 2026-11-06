@@ -135,12 +135,19 @@
             }
         }
 
+        var hasRealPosition = false;
+
         function updateUserPosition(lat, lon) {
             if (!map) {
-                initMap(lat, lon, 16);
+                initMap(lat, lon, 17);
+                hasRealPosition = true;
                 return;
             }
             var latLng = [lat, lon];
+            if (!hasRealPosition) {
+                hasRealPosition = true;
+                map.setView(latLng, 17);
+            }
             if (!userMarker) {
                 var icon = L.divIcon({
                     className: 'user-pulse-marker',
@@ -158,7 +165,13 @@
         }
 
         function addPoint(lat, lon) {
-            if (!map) initMap(lat, lon, 16);
+            if (!map) {
+                initMap(lat, lon, 17);
+                hasRealPosition = true;
+            } else if (!hasRealPosition) {
+                hasRealPosition = true;
+                map.setView([lat, lon], 17);
+            }
             var latLng = [lat, lon];
             routeCoords.push(latLng);
 
@@ -193,8 +206,11 @@
                 }
 
                 if (!map) {
-                    initMap(routeCoords[0][0], routeCoords[0][1], 15);
+                    initMap(routeCoords[0][0], routeCoords[0][1], 16);
+                } else {
+                    map.setView(routeCoords[0], 16);
                 }
+                hasRealPosition = true;
 
                 if (routePolyline) {
                     routePolyline.setLatLngs(routeCoords);
@@ -228,7 +244,19 @@
             if (!map || routeCoords.length === 0) return;
             try {
                 var bounds = L.latLngBounds(routeCoords);
-                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+                // Ensure at least a realistic geographic span (~250-300m) so tiny routes don't overzoom or distort
+                var latSpan = Math.abs(bounds.getNorth() - bounds.getSouth());
+                var lonSpan = Math.abs(bounds.getEast() - bounds.getWest());
+                var minSpan = 0.0025; // ~275 meters
+                if (latSpan < minSpan || lonSpan < minSpan) {
+                    var padLat = Math.max(0, (minSpan - latSpan) / 2);
+                    var padLon = Math.max(0, (minSpan - lonSpan) / 2);
+                    bounds = L.latLngBounds(
+                        [bounds.getSouth() - padLat, bounds.getWest() - padLon],
+                        [bounds.getNorth() + padLat, bounds.getEast() + padLon]
+                    );
+                }
+                map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
             } catch (e) {
                 console.error("fitRouteBounds error:", e);
             }
@@ -238,13 +266,22 @@
             followUser = enable;
         }
 
-        // Initialize default view (Monas Jakarta fallback center)
+        // Initialize when ready or wait for Android bridge
         window.onload = function() {
-            setTimeout(function() {
-                if (!map) {
-                    initMap(-6.1754, 106.8272, 14);
-                }
-            }, 200);
+            if (navigator.geolocation && !map) {
+                navigator.geolocation.getCurrentPosition(
+                    function(pos) {
+                        if (!map) {
+                            initMap(pos.coords.latitude, pos.coords.longitude, 16);
+                            hasRealPosition = true;
+                        }
+                    },
+                    function() {
+                        // Wait for Android native bridge to inject location
+                    },
+                    { enableHighAccuracy: true, timeout: 3000 }
+                );
+            }
         };
     </script>
 </body>

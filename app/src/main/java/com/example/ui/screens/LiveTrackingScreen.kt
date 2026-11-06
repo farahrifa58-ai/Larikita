@@ -58,7 +58,7 @@ fun LiveTrackingScreen(
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         hasLocationPermission = fineGranted || coarseGranted
-        if (hasLocationPermission && !trackingState.isTracking) {
+        if (hasLocationPermission) {
             onStartTracking(trackingState.isSimulationMode)
         }
     }
@@ -118,7 +118,7 @@ fun LiveTrackingScreen(
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = if (trackingState.isGpsWeak) StatusWarning.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                    border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
                         brush = androidx.compose.ui.graphics.SolidColor(
                             if (trackingState.isGpsWeak) StatusWarning else LimeGreenPrimary.copy(alpha = 0.5f)
                         )
@@ -473,7 +473,7 @@ fun LiveTrackingScreen(
                                 .height(56.dp)
                                 .testTag("finish_button"),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = StatusDanger,
+                                containerColor = Color(0xFF1E293B),
                                 contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(16.dp)
@@ -502,7 +502,7 @@ fun LiveTrackingScreen(
                         onCancelTracking()
                     }
                 ) {
-                    Text("Ya, Batalkan", color = StatusDanger, fontWeight = FontWeight.Bold)
+                    Text("Ya, Batalkan", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -533,6 +533,121 @@ fun LiveTrackingScreen(
             dismissButton = {
                 TextButton(onClick = { showFinishConfirmDialog = false }) {
                     Text("Kembali")
+                }
+            }
+        )
+    }
+
+    // Trial Limit Reached Dialog (1.0 km limit, calm colors, NO RED)
+    if (trackingState.isTrialLimitReached) {
+        AlertDialog(
+            onDismissRequest = { /* Force action to save or exit */ },
+            icon = {
+                Surface(
+                    shape = CircleShape,
+                    color = LimeGreenPrimary.copy(alpha = 0.2f),
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Flag,
+                            contentDescription = null,
+                            tint = LimeGreenDark,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Batas 1 km Versi Trial Tercapai",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Selamat! Anda telah mencapai jarak maksimal 1.0 km untuk Versi Trial. Catatan lari Anda telah siap disimpan.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Tingkatkan ke Full Version untuk berlari tanpa batas jarak dan membuka fitur berbagi rute.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onFinishTracking() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Simpan Hasil Lari", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Trial Expired Dialog
+    if (trackingState.isTrialExpired) {
+        AlertDialog(
+            onDismissRequest = { onBackToHome() },
+            icon = {
+                Surface(
+                    shape = CircleShape,
+                    color = LimeGreenPrimary.copy(alpha = 0.2f),
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = LimeGreenDark,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Masa Percobaan Habis",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "Masa percobaan 24 jam untuk Versi Trial telah berakhir. Silakan beralih ke Full Version untuk terus berlari tanpa batas.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onBackToHome() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimeGreenPrimary,
+                        contentColor = Color(0xFF09140D)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Kembali ke Beranda", fontWeight = FontWeight.Bold)
                 }
             }
         )

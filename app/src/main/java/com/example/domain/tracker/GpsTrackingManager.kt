@@ -47,7 +47,10 @@ data class TrackingUiState(
     val currentPoint: GpsPoint? = null,
     val points: List<GpsPoint> = emptyList(),
     val isSimulationMode: Boolean = false,
-    val activeRunId: String = ""
+    val activeRunId: String = "",
+    val isTrialLimitReached: Boolean = false,
+    val isTrialExpired: Boolean = false,
+    val trialNoticeMessage: String? = null
 )
 
 class GpsTrackingManager(
@@ -150,13 +153,40 @@ class GpsTrackingManager(
 
     @SuppressLint("MissingPermission")
     fun startRun(isSimulation: Boolean = false) {
-        if (_uiState.value.isTracking) return
+        if (_uiState.value.isTracking) {
+            if (!isSimulation) {
+                startLocationUpdates()
+            }
+            return
+        }
+
+        if (com.example.domain.config.EditionConfig.isTrial(context) &&
+            com.example.domain.config.EditionConfig.isTrialExpired(context)
+        ) {
+            _uiState.value = _uiState.value.copy(
+                isTracking = false,
+                isTrialExpired = true,
+                gpsStatusMessage = "Masa Percobaan Habis",
+                trialNoticeMessage = "Masa percobaan 24 jam telah selesai. Silakan perbarui ke Full Version untuk terus berlari tanpa batas waktu dan jarak."
+            )
+            return
+        }
 
         activeRunId = UUID.randomUUID().toString()
         recordedPoints.clear()
         totalDistanceMeters = 0.0
         maxSpeedKmH = 0.0
         lastRecordedPoint = null
+
+        // Check if pre-warmed GPS point is fresh and accurate
+        val warmedPoint = _uiState.value.currentPoint
+        val initialPoint = if (warmedPoint != null && warmedPoint.accuracy <= 25f && (System.currentTimeMillis() - warmedPoint.timestamp) < 20000) {
+            recordedPoints.add(warmedPoint)
+            lastRecordedPoint = warmedPoint
+            warmedPoint
+        } else {
+            null
+        }
 
         sessionStartTime = System.currentTimeMillis()
         accumulatedActiveTimeMs = 0L
@@ -175,11 +205,15 @@ class GpsTrackingManager(
             averageSpeedKmH = 0.0,
             maxSpeedKmH = 0.0,
             calories = 0,
-            gpsStatusMessage = if (isSimulation) "Mode Simulasi Aktif" else "Mencari Sinyal GPS...",
+            gpsStatusMessage = if (isSimulation) "Mode Simulasi Aktif" else if (initialPoint != null) "GPS Terkunci (±${initialPoint.accuracy.toInt()}m)" else "Mencari Sinyal GPS...",
             isGpsWeak = false,
-            points = emptyList(),
+            currentPoint = initialPoint,
+            points = if (initialPoint != null) listOf(initialPoint) else emptyList(),
             isSimulationMode = isSimulation,
-            activeRunId = activeRunId
+            activeRunId = activeRunId,
+            isTrialLimitReached = false,
+            isTrialExpired = false,
+            trialNoticeMessage = null
         )
 
         startTimer()
@@ -190,6 +224,12 @@ class GpsTrackingManager(
         } else {
             startLocationUpdates()
         }
+    }
+
+    fun dismissTrialNotice() {
+        _uiState.value = _uiState.value.copy(
+            trialNoticeMessage = null
+        )
     }
 
     fun pauseRun() {
@@ -207,6 +247,16 @@ class GpsTrackingManager(
 
     fun resumeRun() {
         if (!_uiState.value.isTracking || !_uiState.value.isPaused) return
+
+        if (com.example.domain.config.EditionConfig.isTrial(context) &&
+            totalDistanceMeters >= com.example.domain.config.EditionConfig.MAX_TRIAL_DISTANCE_METERS
+        ) {
+            _uiState.value = _uiState.value.copy(
+                isTrialLimitReached = true,
+                trialNoticeMessage = "Batas maksimal 1.0 km untuk Versi Trial telah tercapai. Lari Anda siap disimpan. Dapatkan Full Version untuk berlari tanpa batas jarak!"
+            )
+            return
+        }
 
         lastResumeTimestamp = SystemClock.elapsedRealtime()
 
@@ -328,6 +378,25 @@ class GpsTrackingManager(
 
         if (isValid) {
             consecutiveRejects = 0
+
+            val isTrial = com.example.domain.config.EditionConfig.isTrial(context)
+            if (isTrial && totalDistanceMeters + deltaDistance >= com.example.domain.config.EditionConfig.MAX_TRIAL_DISTANCE_METERS) {
+                totalDistanceMeters = com.example.domain.config.EditionConfig.MAX_TRIAL_DISTANCE_METERS
+                recordedPoints.add(candidate)
+                lastRecordedPoint = candidate
+                val nowElapsed = SystemClock.elapsedRealtime()
+                accumulatedActiveTimeMs += (nowElapsed - lastResumeTimestamp)
+                _uiState.value = _uiState.value.copy(
+                    isPaused = true,
+                    isTrialLimitReached = true,
+                    distanceMeters = 1000.0,
+                    gpsStatusMessage = "Batas 1 km Trial Tercapai",
+                    trialNoticeMessage = "Batas maksimal 1.0 km untuk Versi Trial telah tercapai. Lari Anda siap disimpan. Dapatkan Full Version untuk lari tanpa batas!"
+                )
+                updateMetrics(gpsStatus, isWeak, candidate)
+                return
+            }
+
             totalDistanceMeters += deltaDistance
             recordedPoints.add(candidate)
             lastRecordedPoint = candidate
@@ -451,7 +520,23 @@ class GpsTrackingManager(
     }
 
     @SuppressLint("MissingPermission")
-    private fun startLocationUpdates() {
+    fun startLocationUpdates() {
+        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine && !hasCoarse) {
+            _uiState.value = _uiState.value.copy(
+                gpsStatusMessage = "Menunggu Izin Akses GPS..."
+            )
+            return
+        }
+
         try {
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
                 .setMinUpdateIntervalMillis(500)
@@ -465,38 +550,37 @@ class GpsTrackingManager(
                 Looper.getMainLooper()
             )
 
-            // Fallback native LocationManager registration
+            // Direct native GPS satellite provider (do NOT use cellular network provider to avoid teleports)
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-            if (lm != null) {
-                if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    lm.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER,
-                        1000L,
-                        1.0f,
-                        nativeLocationListener,
-                        Looper.getMainLooper()
-                    )
-                } else if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                    lm.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER,
-                        1500L,
-                        2.0f,
-                        nativeLocationListener,
-                        Looper.getMainLooper()
-                    )
+            if (lm != null && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                lm.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    1000L,
+                    1.0f,
+                    nativeLocationListener,
+                    Looper.getMainLooper()
+                )
+            }
+
+            // Immediately check last known fresh location for instant anchor
+            fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                if (lastLoc != null && lastLoc.accuracy <= 25.0f && (System.currentTimeMillis() - lastLoc.time) < 30000) {
+                    if (lastRecordedPoint == null) {
+                        handleNewLocation(lastLoc)
+                    }
                 }
             }
 
-            // Immediately query fresh high-accuracy location
+            // Request fresh high-accuracy GPS fix immediately
             fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                 .addOnSuccessListener { loc ->
-                    if (loc != null && loc.accuracy <= 25.0f && (System.currentTimeMillis() - loc.time) < 10000) {
+                    if (loc != null && loc.accuracy <= 25.0f) {
                         handleNewLocation(loc)
                     }
                 }
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(
-                gpsStatusMessage = "Gagal mengaktifkan sensor GPS: ${e.localizedMessage}"
+                gpsStatusMessage = "Mencari Sinyal GPS..."
             )
         }
     }
@@ -506,6 +590,12 @@ class GpsTrackingManager(
      */
     @SuppressLint("MissingPermission")
     fun warmUpGps() {
+        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!hasFine) return
+
         try {
             if (isGpsEnabled()) {
                 fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
